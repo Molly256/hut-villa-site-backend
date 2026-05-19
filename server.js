@@ -9,7 +9,7 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public')); // serves files from /public folder
+app.use(express.static('public'));
 
 // MongoDB connection
 const MONGO_URI = process.env.MONGO_URI;
@@ -37,7 +37,58 @@ function normalizePhone(phone) {
   return phone.replace(/\D/g, '');
 }
 
-// 1. User creates a deposit request
+// Auth routes
+app.post('/api/register', async (req, res) => {
+  try {
+    const phone = normalizePhone(req.body.phone);
+    const password = req.body.password;
+    
+    if (!phone || !password) {
+      return res.status(400).json({ error: 'Phone and password required' });
+    }
+
+    const exists = await db.collection('users').findOne({ phoneNumber: phone });
+    if (exists) {
+      return res.status(400).json({ error: 'Account already exists' });
+    }
+
+    await db.collection('users').insertOne({
+      phoneNumber: phone,
+      password: password,
+      balance: 0,
+      createdAt: new Date()
+    });
+
+    res.json({ success: true, message: 'Account created' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const phone = normalizePhone(req.body.phone);
+    const password = req.body.password;
+
+    const user = await db.collection('users').findOne({ 
+      phoneNumber: phone, 
+      password: password 
+    });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'No account found. Please register first.' });
+    }
+
+    res.json({ 
+      success: true, 
+      user: { phoneNumber: user.phoneNumber, balance: user.balance } 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Deposit routes
 app.post('/api/deposit', async (req, res) => {
   try {
     const phoneNumber = normalizePhone(req.body.phoneNumber);
@@ -63,7 +114,6 @@ app.post('/api/deposit', async (req, res) => {
   }
 });
 
-// 2. View all pending deposits
 app.get('/api/deposits/pending', async (req, res) => {
   try {
     const pending = await db.collection('deposits').find({ status: 'pending' }).toArray();
@@ -73,7 +123,6 @@ app.get('/api/deposits/pending', async (req, res) => {
   }
 });
 
-// 3. Confirm a deposit - adds money to user balance
 app.post('/api/deposit/confirm/:id', async (req, res) => {
   try {
     const deposit = await db.collection('deposits').findOne({ 
@@ -102,7 +151,7 @@ app.post('/api/deposit/confirm/:id', async (req, res) => {
   }
 });
 
-// 4. User creates a withdrawal request
+// Withdrawal routes
 app.post('/api/withdraw', async (req, res) => {
   try {
     const phoneNumber = normalizePhone(req.body.phoneNumber);
@@ -134,7 +183,6 @@ app.post('/api/withdraw', async (req, res) => {
   }
 });
 
-// 5. View all pending withdrawals
 app.get('/api/withdrawals/pending', async (req, res) => {
   try {
     const pending = await db.collection('withdrawals').find({ status: 'pending' }).toArray();
@@ -144,7 +192,6 @@ app.get('/api/withdrawals/pending', async (req, res) => {
   }
 });
 
-// 6. Confirm a withdrawal - deducts money from user balance
 app.post('/api/withdraw/confirm/:id', async (req, res) => {
   try {
     const withdrawal = await db.collection('withdrawals').findOne({ 
@@ -173,7 +220,7 @@ app.post('/api/withdraw/confirm/:id', async (req, res) => {
   }
 });
 
-// 7. Check user balance by phone number
+// Balance and transactions
 app.get('/api/balance/:phoneNumber', async (req, res) => {
   try {
     const phoneNumber = normalizePhone(req.params.phoneNumber);
@@ -184,7 +231,6 @@ app.get('/api/balance/:phoneNumber', async (req, res) => {
   }
 });
 
-// 8. Get all transactions for a user
 app.get('/api/transactions/:phone', async (req, res) => {
   try {
     const phone = normalizePhone(req.params.phone);
@@ -220,14 +266,13 @@ app.get('/api/transactions/:phone', async (req, res) => {
   }
 });
 
-// Start server after DB connects
+// Start server
 connectDB().then(() => {
   app.listen(PORT, () => {
     console.log(`hut-villa-site-backend running on port ${PORT}`);
   });
 });
 
-// Graceful shutdown
 process.on('SIGTERM', async () => {
   await client.close();
   process.exit(0);
