@@ -184,6 +184,42 @@ app.get('/api/balance/:phoneNumber', async (req, res) => {
   }
 });
 
+// 8. Get all transactions for a user
+app.get('/api/transactions/:phone', async (req, res) => {
+  try {
+    const phone = normalizePhone(req.params.phone);
+    
+    const deposits = await db.collection('deposits')
+      .find({ phoneNumber: phone })
+      .toArray();
+      
+    const withdrawals = await db.collection('withdrawals')
+      .find({ phoneNumber: phone })
+      .toArray();
+
+    const all = [
+      ...deposits.map(d => ({
+        ...d,
+        type: 'Deposit',
+        amount: d.amount,
+        status: d.status,
+        timestamp: d.createdAt
+      })),
+      ...withdrawals.map(w => ({
+        ...w,
+        type: 'Withdrawal', 
+        amount: w.amount,
+        status: w.status,
+        timestamp: w.createdAt
+      }))
+    ].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    res.json(all);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Start server after DB connects
 connectDB().then(() => {
   app.listen(PORT, () => {
