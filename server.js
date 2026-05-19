@@ -266,6 +266,28 @@ app.get('/api/transactions/:phone', async (req, res) => {
   }
 });
 
+// Admin route: get all pending deposits and withdrawals in one call
+app.get('/api/admin/pending', async (req, res) => {
+  try {
+    const pendingDeposits = await db.collection('deposits')
+      .find({ status: 'pending' })
+      .sort({ createdAt: -1 })
+      .toArray();
+    
+    const pendingWithdrawals = await db.collection('withdrawals')
+      .find({ status: 'pending' })
+      .sort({ createdAt: -1 })
+      .toArray();
+    
+    res.json({
+      deposits: pendingDeposits,
+      withdrawals: pendingWithdrawals
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Start server
 connectDB().then(() => {
   app.listen(PORT, () => {
