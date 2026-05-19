@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin - Pendings</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+    th { background: #f2f2f2; }
+    button { padding: 6px 12px; background: #4CAF50; color: white; border: none; cursor: pointer; }
+    button:hover { background: #45a049; }
+    h2 { margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <h1>Pending Requests</h1>
+  
+  <h2>Deposits</h2>
+  <table id="deposits">
+    <tr><th>Phone</th><th>Amount</th><th>Time</th><th>Action</th></tr>
+  </table>
+
+  <h2>Withdrawals</h2>
+  <table id="withdrawals">
+    <tr><th>Phone</th><th>Amount</th><th>Details</th><th>Time</th><th>Action</th></tr>
+  </table>
+
+  <script>
+    async function loadDeposits() {
+      const res = await fetch('/api/deposits/pending');
+      const data = await res.json();
+      const table = document.getElementById('deposits');
+      data.forEach(d => {
+        table.innerHTML += `
+          <tr>
+            <td>${d.phoneNumber}</td>
+            <td>${d.amount}</td>
+            <td>${new Date(d.createdAt).toLocaleString()}</td>
+            <td><button onclick="confirmDeposit('${d._id}')">Confirm</button></td>
+          </tr>
+        `;
+      });
+    }
+
+    async function loadWithdrawals() {
+      const res = await fetch('/api/withdrawals/pending');
+      const data = await res.json();
+      const table = document.getElementById('withdrawals');
+      data.forEach(w => {
+        table.innerHTML += `
+          <tr>
+            <td>${w.phoneNumber}</td>
+            <td>${w.amount}</td>
+            <td>${w.details || '-'}</td>
+            <td>${new Date(w.createdAt).toLocaleString()}</td>
+            <td><button onclick="confirmWithdrawal('${w._id}')">Confirm</button></td>
+          </tr>
+        `;
+      });
+    }
+
+    async function confirmDeposit(id) {
+      await fetch(`/api/deposit/confirm/${id}`, { method: 'POST' });
+      alert('Deposit confirmed');
+      location.reload();
+    }
+
+    async function confirmWithdrawal(id) {
+      await fetch(`/api/withdraw/confirm/${id}`, { method: 'POST' });
+      alert('Withdrawal confirmed');
+      location.reload();
+    }
+
+    loadDeposits();
+    loadWithdrawals();
+  </script>
+</body>
+</html>

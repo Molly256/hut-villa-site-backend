@@ -9,6 +9,7 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.static('public')); // serves files from /public folder
 
 // MongoDB connection
 const MONGO_URI = process.env.MONGO_URI;
