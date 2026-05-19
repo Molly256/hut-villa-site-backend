@@ -55,6 +55,7 @@ app.post('/api/register', async (req, res) => {
     await db.collection('users').insertOne({
       phoneNumber: phone,
       password: password,
+      role: 'user',
       balance: 0,
       createdAt: new Date()
     });
@@ -81,8 +82,41 @@ app.post('/api/login', async (req, res) => {
 
     res.json({ 
       success: true, 
-      user: { phoneNumber: user.phoneNumber, balance: user.balance } 
+      user: { 
+        phoneNumber: user.phoneNumber, 
+        balance: user.balance,
+        role: user.role || 'user'
+      } 
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// TEMP ROUTE - DELETE AFTER CREATING ADMIN
+app.post('/api/auth/create-admin', async (req, res) => {
+  try {
+    const phone = normalizePhone(req.body.phone);
+    const password = req.body.password;
+    
+    if (!phone || !password) {
+      return res.status(400).json({ error: 'Phone and password required' });
+    }
+
+    const exists = await db.collection('users').findOne({ phoneNumber: phone });
+    if (exists) {
+      return res.status(400).json({ error: 'Account already exists' });
+    }
+
+    await db.collection('users').insertOne({
+      phoneNumber: phone,
+      password: password,
+      role: 'admin',
+      balance: 0,
+      createdAt: new Date()
+    });
+
+    res.json({ success: true, message: 'Admin created successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
