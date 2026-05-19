@@ -31,10 +31,16 @@ async function connectDB() {
   }
 }
 
+// Helper: normalize phone to remove +, spaces, dashes
+function normalizePhone(phone) {
+  return phone.replace(/\D/g, '');
+}
+
 // 1. User creates a deposit request
 app.post('/api/deposit', async (req, res) => {
   try {
-    const { phoneNumber, amount } = req.body;
+    const phoneNumber = normalizePhone(req.body.phoneNumber);
+    const amount = Number(req.body.amount);
     
     if (!phoneNumber || !amount) {
       return res.status(400).json({ error: 'Phone number and amount required' });
@@ -42,7 +48,7 @@ app.post('/api/deposit', async (req, res) => {
     
     const deposit = {
       phoneNumber,
-      amount: Number(amount),
+      amount,
       status: 'pending',
       createdAt: new Date()
     };
@@ -98,7 +104,8 @@ app.post('/api/deposit/confirm/:id', async (req, res) => {
 // 4. User creates a withdrawal request
 app.post('/api/withdraw', async (req, res) => {
   try {
-    const { phoneNumber, amount, details } = req.body;
+    const phoneNumber = normalizePhone(req.body.phoneNumber);
+    const amount = Number(req.body.amount);
     
     if (!phoneNumber || !amount) {
       return res.status(400).json({ error: 'Phone number and amount required' });
@@ -106,14 +113,14 @@ app.post('/api/withdraw', async (req, res) => {
     
     const user = await db.collection('users').findOne({ phoneNumber });
     
-    if (!user || user.balance < Number(amount)) {
+    if (!user || user.balance < amount) {
       return res.status(400).json({ error: 'Insufficient balance' });
     }
     
     const withdrawal = {
       phoneNumber,
-      amount: Number(amount),
-      details: details || '',
+      amount,
+      details: req.body.details || '',
       status: 'pending',
       createdAt: new Date()
     };
@@ -168,7 +175,8 @@ app.post('/api/withdraw/confirm/:id', async (req, res) => {
 // 7. Check user balance by phone number
 app.get('/api/balance/:phoneNumber', async (req, res) => {
   try {
-    const user = await db.collection('users').findOne({ phoneNumber: req.params.phoneNumber });
+    const phoneNumber = normalizePhone(req.params.phoneNumber);
+    const user = await db.collection('users').findOne({ phoneNumber });
     res.json({ balance: user ? user.balance : 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
