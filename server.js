@@ -6,6 +6,10 @@ const { MongoClient, ObjectId } = require('mongodb');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// 1. ADD YOUR ADMIN DETAILS HERE
+const ADMIN_PHONE = '256753520252'; // put your number with country code, no +, no spaces
+const ADMIN_PASS = 'admin256$'; // change this
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -35,6 +39,18 @@ async function connectDB() {
 // Helper: normalize phone to remove +, spaces, dashes
 function normalizePhone(phone) {
   return phone.replace(/\D/g, '');
+}
+
+// 2. ADD THIS MIDDLEWARE - blocks non-admins
+function checkAdmin(req, res, next) {
+  const phone = normalizePhone(req.body.phone || req.query.phone || req.headers['x-admin-phone']);
+  const password = req.body.password || req.query.password || req.headers['x-admin-password'];
+
+  if (phone === ADMIN_PHONE && password === ADMIN_PASS) {
+    return next();
+  }
+  
+  return res.status(403).json({ error: 'Unauthorized - Admin only' });
 }
 
 // Auth routes
@@ -148,7 +164,8 @@ app.post('/api/deposit', async (req, res) => {
   }
 });
 
-app.get('/api/deposits/pending', async (req, res) => {
+// 3. PROTECT ADMIN ROUTES BY ADDING checkAdmin MIDDLEWARE
+app.get('/api/deposits/pending', checkAdmin, async (req, res) => {
   try {
     const pending = await db.collection('deposits').find({ status: 'pending' }).toArray();
     res.json(pending);
@@ -157,7 +174,7 @@ app.get('/api/deposits/pending', async (req, res) => {
   }
 });
 
-app.post('/api/deposit/confirm/:id', async (req, res) => {
+app.post('/api/deposit/confirm/:id', checkAdmin, async (req, res) => {
   try {
     const deposit = await db.collection('deposits').findOne({ 
       _id: new ObjectId(req.params.id),
@@ -217,7 +234,7 @@ app.post('/api/withdraw', async (req, res) => {
   }
 });
 
-app.get('/api/withdrawals/pending', async (req, res) => {
+app.get('/api/withdrawals/pending', checkAdmin, async (req, res) => {
   try {
     const pending = await db.collection('withdrawals').find({ status: 'pending' }).toArray();
     res.json(pending);
@@ -226,7 +243,7 @@ app.get('/api/withdrawals/pending', async (req, res) => {
   }
 });
 
-app.post('/api/withdraw/confirm/:id', async (req, res) => {
+app.post('/api/withdraw/confirm/:id', checkAdmin, async (req, res) => {
   try {
     const withdrawal = await db.collection('withdrawals').findOne({ 
       _id: new ObjectId(req.params.id),
@@ -301,7 +318,7 @@ app.get('/api/transactions/:phone', async (req, res) => {
 });
 
 // Admin route: get all pending deposits and withdrawals in one call
-app.get('/api/admin/pending', async (req, res) => {
+app.get('/api/admin/pending', checkAdmin, async (req, res) => {
   try {
     const pendingDeposits = await db.collection('deposits')
       .find({ status: 'pending' })
