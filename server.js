@@ -36,6 +36,8 @@ async function connectDB() {
   }
 }
 
+connectDB();
+
 // Helper: normalize phone to 12 digits with 256
 function normalizePhone(phone) {
   let digits = phone.replace(/\D/g, '');
@@ -149,5 +151,110 @@ app.post('/api/auth/create-admin', async (req, res) => {
   }
 });
 
+// Admin: Reset user password
+app.post('/api/admin/reset-password', checkAdmin, async (req, res) => {
+  try {
+    const { targetPhone, newPassword } = req.body;
+    
+    if (!targetPhone || !newPassword) {
+      return res.status(400).json({ error: 'targetPhone and newPassword required' });
+    }
+
+    const normalizedTarget = normalizePhone(targetPhone);
+
+    const result = await db.collection('users').updateOne(
+      { phoneNumber: normalizedTarget },
+      { $set: { password: newPassword } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    res.json({ 
+      success: true, 
+      message: `Password updated for ${normalizedTarget}` 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ========== NEW: Pending Transactions Routes ========== */
+
+// Get all pending deposits and withdrawals
+app.get('/api/admin/pending-transactions', checkAdmin, async (req, res) => {
+  try {
+    const deposits = await db.collection('deposits')
+      .find({ status: 'pending' })
+      .sort({ createdAt: -1 })
+      .toArray();
+    
+    const withdrawals = await db.collection('withdrawals')
+      .find({ status: 'pending' })
+      .sort({ createdAt: -1 })
+      .toArray();
+    
+    res.json({ success: true, deposits, withdrawals });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Approve or reject a transaction
+app.post('/api/admin/approve-transaction', checkAdmin, async (req, res) => {
+  try {
+    const { type, id, action } = req.body;
+    // type = 'deposit' or 'withdrawal'
+    // action = 'approve' or 'reject'
+    
+    if (!type || !id || !action) {
+      return res.status(400).json({ error: 'type, id, and action are required' });
+    }
+
+    const collection = type === 'deposit' ? 'deposits' : 'withdrawals';
+    const transaction = await db.collection(collection).findOne({ _id: new ObjectId(id) });
+    
+    if (!transaction) {
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+
+    if (transaction.status !== 'pending') {
+      return res.status(400).json({ error: 'Transaction already processed' });
+    }
+
+    const newStatus = action === 'approve' ? 'approved' : 'rejected';
+    
+    await db.collection(collection).updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status: newStatus, processedAt: new Date() } }
+    );
+    
+    // If approving a deposit, add to user balance
+    if (action === 'approve' && type === 'deposit') {
+      await db.collection('users').updateOne(
+        { phoneNumber: transaction.phoneNumber },
+        { $inc: { balance: transaction.amount } }
+      );
+    }
+    
+    // If approving a withdrawal, deduct from balance
+    if (action === 'approve' && type === 'withdrawal') {
+      await db.collection('users').updateOne(
+        { phoneNumber: transaction.phoneNumber },
+        { $inc: { balance: -transaction.amount } }
+      );
+    }
+    
+    res.json({ success: true, message: `Transaction ${newStatus}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ... keep all your other routes exactly as they are below this point
 // Deposit routes, withdrawal routes, balance, transactions, admin routes
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
