@@ -17,29 +17,33 @@ app.use(express.static('public'));
 
 // MongoDB connection
 const MONGO_URI = process.env.MONGO_URI;
-if (!MONGO_URI) {
-  console.error('MONGO_URI not set in environment variables');
-  process.exit(1);
-}
 
-const client = new MongoClient(MONGO_URI);
 let db;
+let client;
 
 async function connectDB() {
-  try {
-    await client.connect();
-    db = client.db('hutvilla');
-    console.log('Connected to MongoDB');
-  } catch (err) {
-    console.error('MongoDB connection failed:', err);
-    process.exit(1);
+  if (!MONGO_URI) {
+    throw new Error('MONGO_URI not set in environment variables');
   }
+  
+  if (!MONGO_URI.startsWith('mongodb://') && !MONGO_URI.startsWith('mongodb+srv://')) {
+    throw new Error('Invalid MONGO_URI format. Must start with mongodb:// or mongodb+srv://');
+  }
+
+  client = new MongoClient(MONGO_URI);
+  await client.connect();
+  db = client.db('hutvilla');
+  console.log('Connected to MongoDB');
 }
 
-connectDB();
+// Connect but don't crash the process
+connectDB().catch(err => {
+  console.error('MongoDB connection failed:', err.message);
+});
 
 // Helper: normalize phone to 12 digits with 256
 function normalizePhone(phone) {
+  if (!phone) return '';
   let digits = phone.replace(/\D/g, '');
   
   // If 9 digits starting with 7, add 256
@@ -62,8 +66,25 @@ function checkAdmin(req, res, next) {
   return res.status(403).json({ error: 'Unauthorized - Admin only' });
 }
 
+// Health check route - works even if DB is down
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    db: db ? 'connected' : 'disconnected',
+    mongoUriSet: !!MONGO_URI 
+  });
+});
+
+// DB check middleware for routes that need DB
+function checkDB(req, res, next) {
+  if (!db) {
+    return res.status(500).json({ error: 'Database not connected. Check MONGO_URI in Vercel.' });
+  }
+  next();
+}
+
 // Auth routes
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', checkDB, async (req, res) => {
   try {
     const phone = normalizePhone(req.body.phone);
     const password = req.body.password;
@@ -95,7 +116,7 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-app.post('/api/login', async (req, res) => {
+app.post('/api/login', checkDB, async (req, res) => {
   try {
     const phone = normalizePhone(req.body.phone);
     const password = req.body.password;
@@ -123,7 +144,7 @@ app.post('/api/login', async (req, res) => {
 });
 
 // TEMP ROUTE - DELETE AFTER CREATING ADMIN
-app.post('/api/auth/create-admin', async (req, res) => {
+app.post('/api/auth/create-admin', checkDB, async (req, res) => {
   try {
     let phone = normalizePhone(req.body.phone);
     const password = req.body.password;
@@ -152,7 +173,7 @@ app.post('/api/auth/create-admin', async (req, res) => {
 });
 
 // Admin: Reset user password
-app.post('/api/admin/reset-password', checkAdmin, async (req, res) => {
+app.post('/api/admin/reset-password', checkAdmin, checkDB, async (req, res) => {
   try {
     const { targetPhone, newPassword } = req.body;
     
@@ -180,10 +201,10 @@ app.post('/api/admin/reset-password', checkAdmin, async (req, res) => {
   }
 });
 
-/* ========== NEW: Pending Transactions Routes ========== */
+/* ========== Pending Transactions Routes ========== */
 
 // Get all pending deposits and withdrawals
-app.get('/api/admin/pending-transactions', checkAdmin, async (req, res) => {
+app.get('/api/admin/pending-transactions', checkAdmin, checkDB, async (req, res) => {
   try {
     const deposits = await db.collection('deposits')
       .find({ status: 'pending' })
@@ -202,11 +223,9 @@ app.get('/api/admin/pending-transactions', checkAdmin, async (req, res) => {
 });
 
 // Approve or reject a transaction
-app.post('/api/admin/approve-transaction', checkAdmin, async (req, res) => {
+app.post('/api/admin/approve-transaction', checkAdmin, checkDB, async (req, res) => {
   try {
     const { type, id, action } = req.body;
-    // type = 'deposit' or 'withdrawal'
-    // action = 'approve' or 'reject'
     
     if (!type || !id || !action) {
       return res.status(400).json({ error: 'type, id, and action are required' });
@@ -230,7 +249,6 @@ app.post('/api/admin/approve-transaction', checkAdmin, async (req, res) => {
       { $set: { status: newStatus, processedAt: new Date() } }
     );
     
-    // If approving a deposit, add to user balance
     if (action === 'approve' && type === 'deposit') {
       await db.collection('users').updateOne(
         { phoneNumber: transaction.phoneNumber },
@@ -238,7 +256,6 @@ app.post('/api/admin/approve-transaction', checkAdmin, async (req, res) => {
       );
     }
     
-    // If approving a withdrawal, deduct from balance
     if (action === 'approve' && type === 'withdrawal') {
       await db.collection('users').updateOne(
         { phoneNumber: transaction.phoneNumber },
@@ -252,9 +269,10 @@ app.post('/api/admin/approve-transaction', checkAdmin, async (req, res) => {
   }
 });
 
-// ... keep all your other routes exactly as they are below this point
-// Deposit routes, withdrawal routes, balance, transactions, admin routes
+// Add your other routes below this point
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+module.exports = app;
