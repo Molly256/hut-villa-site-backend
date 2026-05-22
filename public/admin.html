@@ -1,78 +1,197 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Admin - Pendings</title>
+  <meta charset="utf-8">
+  <title>Hutvilla Admin</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 20px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-    th { background: #f2f2f2; }
-    button { padding: 6px 12px; background: #4CAF50; color: white; border: none; cursor: pointer; }
-    button:hover { background: #45a049; }
-    h2 { margin-top: 40px; }
+    body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: auto; background: white; padding: 20px; border-radius: 8px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #333; color: white; }
+    button { margin: 2px; padding: 6px 12px; cursor: pointer; border: none; border-radius: 4px; }
+    .approve { background: #28a745; color: white; }
+    .reject { background: #dc3545; color: white; }
+    input { padding: 6px; margin: 4px 0; width: 200px; display: block; }
+    .hidden { display: none; }
+    hr { margin: 30px 0; }
+    img { max-width: 100px; cursor: pointer; }
   </style>
 </head>
 <body>
-  <h1>Pending Requests</h1>
+<div class="container">
+<div id="loginDiv">
+  <h2>Admin Login</h2>
+  <input id="loginUser" placeholder="Admin Email">
+  <input id="loginPass" type="password" placeholder="Password">
+  <button onclick="login()">Login</button>
+  <p id="loginError" style="color:red"></p>
+</div>
+
+<div id="adminDiv" class="hidden">
+  <h1>Hutvilla Admin</h1>
+  <button onclick="logout()">Logout</button>
   
-  <h2>Deposits</h2>
-  <table id="deposits">
-    <tr><th>Phone</th><th>Amount</th><th>Time</th><th>Action</th></tr>
-  </table>
+  <hr>
+  <h3>Pending Deposits</h3>
+  <div id="deposits">Loading...</div>
+  
+  <hr>
+  <h3>Pending Withdrawals</h3>
+  <div id="withdrawals">Loading...</div>
+  
+  <hr>
+  <h3>Reset Password</h3>
+  <input id="resetUser" placeholder="User ID">
+  <input id="resetPass" placeholder="New Password">
+  <button onclick="resetPassword()">Reset</button>
+  <p id="resetMsg"></p>
+</div>
+</div>
 
-  <h2>Withdrawals</h2>
-  <table id="withdrawals">
-    <tr><th>Phone</th><th>Amount</th><th>Details</th><th>Time</th><th>Action</th></tr>
-  </table>
+<script>
+const BASE_URL = 'https://hut-villa-site-backend.pockethost.io';
+let authToken = localStorage.getItem('adminToken') || '';
 
-  <script>
-    async function loadDeposits() {
-      const res = await fetch('/api/deposits/pending');
-      const data = await res.json();
-      const table = document.getElementById('deposits');
-      data.forEach(d => {
-        table.innerHTML += `
-          <tr>
-            <td>${d.phoneNumber}</td>
-            <td>${d.amount}</td>
-            <td>${new Date(d.createdAt).toLocaleString()}</td>
-            <td><button onclick="confirmDeposit('${d._id}')">Confirm</button></td>
-          </tr>
-        `;
+if (authToken) checkAdmin();
+
+async function login() {
+  const user = document.getElementById('loginUser').value;
+  const pass = document.getElementById('loginPass').value;
+  
+  try {
+    const res = await fetch(`${BASE_URL}/api/collections/admins/auth-with-password`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({identity: user, password: pass})
+    });
+    if (!res.ok) throw new Error('Login failed');
+    
+    const data = await res.json();
+    authToken = data.token;
+    localStorage.setItem('adminToken', authToken);
+    checkAdmin();
+  } catch {
+    document.getElementById('loginError').textContent = 'Invalid credentials';
+  }
+}
+
+function checkAdmin() {
+  document.getElementById('loginDiv').classList.add('hidden');
+  document.getElementById('adminDiv').classList.remove('hidden');
+  loadDeposits();
+  loadWithdrawals();
+}
+
+function logout() {
+  localStorage.clear();
+  authToken = '';
+  location.reload();
+}
+
+async function loadDeposits() {
+  try {
+    const res = await fetch(`${BASE_URL}/api/collections/deposits/records?filter=status="pending"&sort=-created`, {
+      headers: {'Authorization': 'Bearer ' + authToken}
+    });
+    if (!res.ok) throw new Error('Not authorized');
+    const data = await res.json();
+    
+    let html = '<table><tr><th>User</th><th>Amount</th><th>Proof</th><th>Action</th></tr>';
+    if (data.items && data.items.length > 0) {
+      data.items.forEach(d => {
+        const fileUrl = d.proof ? `${BASE_URL}/api/files/deposits/${d.id}/${d.proof}` : '';
+        html += `<tr>
+          <td>${d.user_id}</td>
+          <td>${d.amount.toLocaleString()} UGX</td>
+          <td>${fileUrl ? `<a href="${fileUrl}" target="_blank"><img src="${fileUrl}"></a>` : 'None'}</td>
+          <td>
+            <button class="approve" onclick="updateDeposit('${d.id}', 'approved')">Approve</button>
+            <button class="reject" onclick="updateDeposit('${d.id}', 'rejected')">Reject</button>
+          </td>
+        </tr>`;
       });
+    } else {
+      html += '<tr><td colspan="4">No pending deposits</td></tr>';
     }
+    html += '</table>';
+    document.getElementById('deposits').innerHTML = html;
+  } catch {
+    document.getElementById('deposits').innerHTML = 'Failed to load. Check you are logged in as admin.';
+  }
+}
 
-    async function loadWithdrawals() {
-      const res = await fetch('/api/withdrawals/pending');
-      const data = await res.json();
-      const table = document.getElementById('withdrawals');
-      data.forEach(w => {
-        table.innerHTML += `
-          <tr>
-            <td>${w.phoneNumber}</td>
-            <td>${w.amount}</td>
-            <td>${w.details || '-'}</td>
-            <td>${new Date(w.createdAt).toLocaleString()}</td>
-            <td><button onclick="confirmWithdrawal('${w._id}')">Confirm</button></td>
-          </tr>
-        `;
+async function updateDeposit(id, status) {
+  await fetch(`${BASE_URL}/api/collections/deposits/records/${id}`, {
+    method: 'PATCH',
+    headers: {'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json'},
+    body: JSON.stringify({status})
+  });
+  loadDeposits();
+}
+
+async function loadWithdrawals() {
+  try {
+    const res = await fetch(`${BASE_URL}/api/collections/withdrawals/records?filter=status="pending"&sort=-created`, {
+      headers: {'Authorization': 'Bearer ' + authToken}
+    });
+    if (!res.ok) throw new Error('Not authorized');
+    const data = await res.json();
+    
+    let html = '<table><tr><th>User</th><th>Amount</th><th>Bank</th><th>Action</th></tr>';
+    if (data.items && data.items.length > 0) {
+      data.items.forEach(w => {
+        html += `<tr>
+          <td>${w.user_id}</td>
+          <td>${w.amount.toLocaleString()} UGX</td>
+          <td>${w.bank_details || '-'}</td>
+          <td>
+            <button class="approve" onclick="updateWithdrawal('${w.id}', 'approved')">Approve</button>
+            <button class="reject" onclick="updateWithdrawal('${w.id}', 'rejected')">Reject</button>
+          </td>
+        </tr>`;
       });
+    } else {
+      html += '<tr><td colspan="4">No pending withdrawals</td></tr>';
     }
+    html += '</table>';
+    document.getElementById('withdrawals').innerHTML = html;
+  } catch {
+    document.getElementById('withdrawals').innerHTML = 'Failed to load. Check you are logged in as admin.';
+  }
+}
 
-    async function confirmDeposit(id) {
-      await fetch(`/api/deposit/confirm/${id}`, { method: 'POST' });
-      alert('Deposit confirmed');
-      location.reload();
-    }
+async function updateWithdrawal(id, status) {
+  await fetch(`${BASE_URL}/api/collections/withdrawals/records/${id}`, {
+    method: 'PATCH',
+    headers: {'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json'},
+    body: JSON.stringify({status})
+  });
+  loadWithdrawals();
+}
 
-    async function confirmWithdrawal(id) {
-      await fetch(`/api/withdraw/confirm/${id}`, { method: 'POST' });
-      alert('Withdrawal confirmed');
-      location.reload();
-    }
-
-    loadDeposits();
-    loadWithdrawals();
-  </script>
+async function resetPassword() {
+  const userId = document.getElementById('resetUser').value;
+  const newPass = document.getElementById('resetPass').value;
+  
+  const res = await fetch(`${BASE_URL}/api/collections/users/records?filter=user_id="${userId}"`, {
+    headers: {'Authorization': 'Bearer ' + authToken}
+  });
+  const data = await res.json();
+  
+  if (!data.items || data.items.length === 0) {
+    document.getElementById('resetMsg').textContent = 'User not found';
+    return;
+  }
+  
+  await fetch(`${BASE_URL}/api/collections/users/records/${data.items[0].id}`, {
+    method: 'PATCH',
+    headers: {'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json'},
+    body: JSON.stringify({password: newPass, passwordConfirm: newPass})
+  });
+  
+  document.getElementById('resetMsg').textContent = 'Password updated';
+}
+</script>
 </body>
 </html>
