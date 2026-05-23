@@ -14,28 +14,10 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Helper: keep phone as 10 digits starting with 0
-function normalizePhone(phone) {
-  if (!phone) return '';
-  let digits = phone.replace(/\D/g, '');
-  
-  // If user types 753520252, make it 0753520252
-  if (digits.length === 9 && digits.startsWith('7')) {
-    digits = '0' + digits;
-  }
-  
-  return digits;
-}
-
-// Admin check - direct compare, 10 digits only
+// Admin check - exact match only
 async function checkAdmin(req, res, next) {
   const phone = (req.headers['x-admin-phone'] || '').trim();
   const password = (req.headers['x-admin-password'] || '').trim();
-
-  console.log('--- Admin Check ---');
-  console.log('Received:', `"${phone}"`);
-  console.log('Env:', `"${ADMIN_PHONE}"`);
-  console.log('Match?', phone === ADMIN_PHONE && password === ADMIN_PASS);
 
   if (phone === ADMIN_PHONE && password === ADMIN_PASS) {
     return next();
@@ -44,18 +26,31 @@ async function checkAdmin(req, res, next) {
   return res.status(403).json({ error: 'Unauthorized - Admin only' });
 }
 
-// Register - stores 10 digits
+// User auth middleware
+async function checkUser(req, res, next) {
+  const phone = req.headers['x-user-phone'];
+  if (!phone) return res.status(401).json({ error: 'User phone required' });
+  
+  const { data: user } = await supabase
+    .from('users')
+    .select('phonenumber, role, balance')
+    .eq('phonenumber', phone)
+    .single();
+    
+  if (!user) return res.status(401).json({ error: 'User not found' });
+  
+  req.user = user;
+  next();
+}
+
+// 1. Register - stores phone exactly as user sends it
 app.post('/api/register', async (req, res) => {
   try {
-    const phone = normalizePhone(req.body.phoneNumber);
+    const phone = req.body.phoneNumber;
     const password = req.body.password;
     
     if (!phone || !password) {
       return res.status(400).json({ error: 'Phone and password required' });
-    }
-
-    if (phone.length !== 10 || !phone.startsWith('0')) {
-      return res.status(400).json({ error: 'Invalid phone. Use 10 digits starting with 0' });
     }
 
     const { data: exists } = await supabase
@@ -82,10 +77,10 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Login - uses 10 digits
+// 2. Login - exact phone match
 app.post('/api/login', async (req, res) => {
   try {
-    const phone = normalizePhone(req.body.phoneNumber);
+    const phone = req.body.phoneNumber;
     const password = req.body.password;
 
     const { data: user, error } = await supabase
@@ -100,10 +95,6 @@ app.post('/api/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
-    if (user.role !== 'admin') {
-      return res.status(403).json({ error: 'Admin access only' });
-    }
-
     res.json({ 
       success: true, 
       user: { phoneNumber: user.phonenumber, balance: user.balance, role: user.role } 
@@ -113,7 +104,110 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Admin routes
+// 3. User Deposit Request
+app.post('/api/deposit', checkUser, async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const phone = req.user.phonenumber;
+    
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'Valid amount required' });
+    }
+
+    const { error } = await supabase
+      .from('deposits')
+      .insert([{ phonenumber: phone, amount: parseFloat(amount), status: 'pending' }]);
+
+    if (error) throw error;
+
+    res.json({ success: true, message: 'Deposit request submitted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. User Withdraw Request
+app.post('/api/withdraw', checkUser, async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const phone = req.user.phonenumber;
+    
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ error: 'Valid amount required' });
+    }
+
+    if (req.user.balance < amount) {
+      return res.status(400).json({ error: 'Insufficient balance' });
+    }
+
+    const { error } = await supabase
+      .from('withdrawals')
+      .insert([{ phonenumber: phone, amount: parseFloat(amount), status: 'pending' }]);
+
+    if (error) throw error;
+
+    res.json({ success: true, message: 'Withdrawal request submitted' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. User Password Reset
+app.post('/api/reset-password', async (req, res) => {
+  try {
+    const phone = req.body.phoneNumber;
+    const { newPassword } = req.body;
+    
+    if (!phone || !newPassword) {
+      return res.status(400).json({ error: 'Phone and new password required' });
+    }
+
+    const hashedPass = await bcrypt.hash(newPassword, 10);
+
+    const { error } = await supabase
+      .from('users')
+      .update({ password: hashedPass })
+      .eq('phonenumber', phone);
+
+    if (error) throw error;
+
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Get user data
+app.get('/api/user/data', checkUser, async (req, res) => {
+  try {
+    const phone = req.user.phonenumber;
+    
+    const { data: deposits } = await supabase
+      .from('deposits')
+      .select('*')
+      .eq('phonenumber', phone)
+      .order('created_at', { ascending: false })
+      .limit(10);
+      
+    const { data: withdrawals } = await supabase
+      .from('withdrawals')
+      .select('*')
+      .eq('phonenumber', phone)
+      .order('created_at', { ascending: false })
+      .limit(10);
+    
+    res.json({ 
+      success: true, 
+      balance: req.user.balance,
+      deposits,
+      withdrawals 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. Admin routes
 app.post('/api/admin/reset-password', checkAdmin, async (req, res) => {
   try {
     const { targetPhone, newPassword } = req.body;
@@ -121,16 +215,15 @@ app.post('/api/admin/reset-password', checkAdmin, async (req, res) => {
       return res.status(400).json({ error: 'targetPhone and newPassword required' });
     }
 
-    const normalizedTarget = normalizePhone(targetPhone);
     const hashedPass = await bcrypt.hash(newPassword, 10);
 
     const { error } = await supabase
       .from('users')
       .update({ password: hashedPass })
-      .eq('phonenumber', normalizedTarget);
+      .eq('phonenumber', targetPhone);
 
     if (error) throw error;
-    res.json({ success: true, message: `Password updated for ${normalizedTarget}` });
+    res.json({ success: true, message: `Password updated for ${targetPhone}` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
