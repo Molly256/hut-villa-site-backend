@@ -15,25 +15,59 @@
 <body>
   <div class="login-box">
     <h2>Admin Login</h2>
-    <input type="email" id="email" placeholder="Email">
-    <input type="password" id="password" placeholder="Password">
+    <input type="tel" id="phone" placeholder="Phone: 07XXXXXXXX" value="0753520252">
+    <input type="password" id="password" placeholder="Password" value="admin256">
     <button id="loginBtn">Login</button>
     <p id="error" class="error"></p>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/pocketbase@0.21.1/dist/pocketbase.umd.js"></script>
   <script>
-    const pb = new PocketBase('https://hut-villa-site-backend.pockethost.io');
+    const BASE_URL = ''; 
 
     document.getElementById('loginBtn').addEventListener('click', async () => {
-      const email = document.getElementById('email').value;
+      let phone = document.getElementById('phone').value.trim();
       const password = document.getElementById('password').value;
+      const errorEl = document.getElementById('error');
+      errorEl.textContent = '';
+      
+      if (!phone || !password) {
+        errorEl.textContent = 'Enter phone and password';
+        return;
+      }
+      
+      // Only strip spaces/dashes, keep as 10 digits
+      phone = phone.replace(/\s|-/g, '');
+      
+      if (phone.length !== 10 || !phone.startsWith('0')) {
+        errorEl.textContent = 'Phone must be 10 digits starting with 0';
+        return;
+      }
       
       try {
-        await pb.collection('admins').authWithPassword(email, password);
+        const res = await fetch(`${BASE_URL}/api/login`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({phoneNumber: phone, password})
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Login failed';
+          return;
+        }
+        
+        if (data.user.role !== 'admin') {
+          errorEl.textContent = 'Not an admin account';
+          return;
+        }
+        
+        localStorage.setItem('adminPhone', phone);
+        localStorage.setItem('adminPass', password);
+        
         window.location.href = 'admin.html';
       } catch (err) {
-        document.getElementById('error').textContent = 'Login failed. Check email/password.';
+        errorEl.textContent = 'Server error. Try again.';
       }
     });
   </script>

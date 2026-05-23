@@ -1,196 +1,224 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Hutvilla Admin</title>
+  <meta charset="UTF-8">
+  <title>Admin Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
-    .container { max-width: 1200px; margin: auto; background: white; padding: 20px; border-radius: 8px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    th { background: #333; color: white; }
-    button { margin: 2px; padding: 6px 12px; cursor: pointer; border: none; border-radius: 4px; }
-    .approve { background: #28a745; color: white; }
-    .reject { background: #dc3545; color: white; }
-    input { padding: 6px; margin: 4px 0; width: 200px; display: block; }
+    body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }
     .hidden { display: none; }
-    hr { margin: 30px 0; }
-    img { max-width: 100px; cursor: pointer; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+    th { background: #f8f9fa; }
+    button { padding: 8px 12px; border: none; border-radius: 4px; cursor: pointer; }
+    button.approve { background: #28a745; color: white; }
+    button.reject { background: #dc3545; color: white; }
+    button:hover { opacity: 0.8; }
+    input { padding: 8px; margin: 5px 0; width: 200px; }
+    .error { color: red; }
+    .success { color: green; }
   </style>
 </head>
 <body>
-<div class="container">
-<div id="loginDiv">
-  <h2>Admin Login</h2>
-  <input id="loginUser" placeholder="Admin Email">
-  <input id="loginPass" type="password" placeholder="Password">
-  <button onclick="login()">Login</button>
-  <p id="loginError" style="color:red"></p>
-</div>
+  <!-- Login Section -->
+  <div id="loginDiv" class="card">
+    <h2>Admin Login</h2>
+    <input type="tel" id="loginUser" placeholder="Phone: 07XXXXXXXX">
+    <input type="password" id="loginPass" placeholder="Password">
+    <button onclick="login()">Login</button>
+    <p id="loginError" class="error"></p>
+  </div>
 
-<div id="adminDiv" class="hidden">
-  <h1>Hutvilla Admin</h1>
-  <button onclick="logout()">Logout</button>
-  
-  <hr>
-  <h3>Pending Deposits</h3>
-  <div id="deposits">Loading...</div>
-  
-  <hr>
-  <h3>Pending Withdrawals</h3>
-  <div id="withdrawals">Loading...</div>
-  
-  <hr>
-  <h3>Reset Password</h3>
-  <input id="resetUser" placeholder="User ID">
-  <input id="resetPass" placeholder="New Password">
-  <button onclick="resetPassword()">Reset</button>
-  <p id="resetMsg"></p>
-</div>
-</div>
+  <!-- Admin Section -->
+  <div id="adminDiv" class="hidden">
+    <div class="header">
+      <h2>Admin Dashboard</h2>
+      <button onclick="logout()">Logout</button>
+    </div>
+
+    <div class="card" id="depositsCard">
+      <h3>Pending Deposits</h3>
+      <div id="deposits">Loading...</div>
+    </div>
+
+    <div class="card" id="withdrawalsCard">
+      <h3>Pending Withdrawals</h3>
+      <div id="withdrawals">Loading...</div>
+    </div>
+
+    <div class="card" id="resetCard">
+      <h3>Reset User Password</h3>
+      <input type="tel" id="resetUser" placeholder="User phone: 07XXXXXXXX">
+      <input type="password" id="resetPass" placeholder="New password">
+      <button onclick="resetPassword()">Reset</button>
+      <p id="resetMsg"></p>
+    </div>
+  </div>
 
 <script>
-const BASE_URL = 'https://hut-villa-site-backend.pockethost.io';
-let authToken = localStorage.getItem('adminToken') || '';
+const BASE_URL = ''; 
+let adminPhone = localStorage.getItem('adminPhone') || '';
+let adminPass = localStorage.getItem('adminPass') || '';
+let adminRole = localStorage.getItem('adminRole') || '';
 
-if (authToken) checkAdmin();
+// Auto-check if already logged in as admin
+if (adminPhone && adminPass && adminRole === 'admin') {
+  checkAdmin();
+} else if (adminPhone && adminPass) {
+  // Logged in but not admin, kick out
+  logout();
+}
 
 async function login() {
-  const user = document.getElementById('loginUser').value;
+  const phone = document.getElementById('loginUser').value.trim();
   const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginError').textContent = '';
   
   try {
-    const res = await fetch(`${BASE_URL}/api/collections/admins/auth-with-password`, {
+    const res = await fetch(`${BASE_URL}/api/login`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({identity: user, password: pass})
+      body: JSON.stringify({phoneNumber: phone, password: pass})
     });
-    if (!res.ok) throw new Error('Login failed');
     
     const data = await res.json();
-    authToken = data.token;
-    localStorage.setItem('adminToken', authToken);
+    if (!res.ok) throw new Error(data.error || 'Login failed');
+    
+    // Only allow admin role
+    if (data.user.role !== 'admin') {
+      throw new Error('Access denied. Admins only.');
+    }
+    
+    adminPhone = phone;
+    adminPass = pass;
+    adminRole = data.user.role;
+    
+    localStorage.setItem('adminPhone', adminPhone);
+    localStorage.setItem('adminPass', adminPass);
+    localStorage.setItem('adminRole', adminRole);
+    
     checkAdmin();
-  } catch {
-    document.getElementById('loginError').textContent = 'Invalid credentials';
+  } catch (err) {
+    document.getElementById('loginError').textContent = err.message;
   }
 }
 
 function checkAdmin() {
   document.getElementById('loginDiv').classList.add('hidden');
   document.getElementById('adminDiv').classList.remove('hidden');
-  loadDeposits();
-  loadWithdrawals();
+  
+  // Handle PWA shortcut tab: ?tab=deposits or ?tab=withdrawals or ?tab=reset
+  const urlParams = new URLSearchParams(window.location.search);
+  const tab = urlParams.get('tab');
+  if (tab) showTab(tab);
+  
+  loadTransactions();
+}
+
+function showTab(tab) {
+  if (tab === 'deposits') {
+    document.getElementById('depositsCard').scrollIntoView({ behavior: 'smooth' });
+  }
+  if (tab === 'withdrawals') {
+    document.getElementById('withdrawalsCard').scrollIntoView({ behavior: 'smooth' });
+  }
+  if (tab === 'reset') {
+    document.getElementById('resetCard').scrollIntoView({ behavior: 'smooth' });
+    document.getElementById('resetUser').focus();
+  }
 }
 
 function logout() {
   localStorage.clear();
-  authToken = '';
+  adminPhone = '';
+  adminPass = '';
+  adminRole = '';
   location.reload();
 }
 
-async function loadDeposits() {
+async function loadTransactions() {
   try {
-    const res = await fetch(`${BASE_URL}/api/collections/deposits/records?filter=status="pending"&sort=-created`, {
-      headers: {'Authorization': 'Bearer ' + authToken}
+    const res = await fetch(`${BASE_URL}/api/admin/pending-transactions`, {
+      headers: {
+        'x-admin-phone': adminPhone,
+        'x-admin-password': adminPass
+      }
     });
-    if (!res.ok) throw new Error('Not authorized');
+    
+    if (!res.ok) {
+      if (res.status === 403) throw new Error('Unauthorized');
+      throw new Error('Failed to load');
+    }
     const data = await res.json();
     
-    let html = '<table><tr><th>User</th><th>Amount</th><th>Proof</th><th>Action</th></tr>';
-    if (data.items && data.items.length > 0) {
-      data.items.forEach(d => {
-        const fileUrl = d.proof ? `${BASE_URL}/api/files/deposits/${d.id}/${d.proof}` : '';
-        html += `<tr>
-          <td>${d.user_id}</td>
-          <td>${d.amount.toLocaleString()} UGX</td>
-          <td>${fileUrl ? `<a href="${fileUrl}" target="_blank"><img src="${fileUrl}"></a>` : 'None'}</td>
-          <td>
-            <button class="approve" onclick="updateDeposit('${d.id}', 'approved')">Approve</button>
-            <button class="reject" onclick="updateDeposit('${d.id}', 'rejected')">Reject</button>
-          </td>
-        </tr>`;
-      });
-    } else {
-      html += '<tr><td colspan="4">No pending deposits</td></tr>';
-    }
-    html += '</table>';
-    document.getElementById('deposits').innerHTML = html;
-  } catch {
-    document.getElementById('deposits').innerHTML = 'Failed to load. Check you are logged in as admin.';
+    renderTable('deposits', data.deposits, 'deposit');
+    renderTable('withdrawals', data.withdrawals, 'withdrawal');
+  } catch (err) {
+    document.getElementById('deposits').innerHTML = err.message;
+    document.getElementById('withdrawals').innerHTML = '';
   }
 }
 
-async function updateDeposit(id, status) {
-  await fetch(`${BASE_URL}/api/collections/deposits/records/${id}`, {
-    method: 'PATCH',
-    headers: {'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json'},
-    body: JSON.stringify({status})
-  });
-  loadDeposits();
-}
-
-async function loadWithdrawals() {
-  try {
-    const res = await fetch(`${BASE_URL}/api/collections/withdrawals/records?filter=status="pending"&sort=-created`, {
-      headers: {'Authorization': 'Bearer ' + authToken}
+function renderTable(divId, items, type) {
+  let html = `<table><tr><th>Phone</th><th>Amount</th><th>Date</th><th>Action</th></tr>`;
+  if (items && items.length > 0) {
+    items.forEach(t => {
+      html += `<tr>
+        <td>${t.phonenumber}</td>
+        <td>${Number(t.amount).toLocaleString()} UGX</td>
+        <td>${new Date(t.created_at).toLocaleString()}</td>
+        <td>
+          <button class="approve" onclick="updateTransaction('${type}', ${t.id}, 'approve')">Approve</button>
+          <button class="reject" onclick="updateTransaction('${type}', ${t.id}, 'reject')">Reject</button>
+        </td>
+      </tr>`;
     });
-    if (!res.ok) throw new Error('Not authorized');
-    const data = await res.json();
-    
-    let html = '<table><tr><th>User</th><th>Amount</th><th>Bank</th><th>Action</th></tr>';
-    if (data.items && data.items.length > 0) {
-      data.items.forEach(w => {
-        html += `<tr>
-          <td>${w.user_id}</td>
-          <td>${w.amount.toLocaleString()} UGX</td>
-          <td>${w.bank_details || '-'}</td>
-          <td>
-            <button class="approve" onclick="updateWithdrawal('${w.id}', 'approved')">Approve</button>
-            <button class="reject" onclick="updateWithdrawal('${w.id}', 'rejected')">Reject</button>
-          </td>
-        </tr>`;
-      });
-    } else {
-      html += '<tr><td colspan="4">No pending withdrawals</td></tr>';
-    }
-    html += '</table>';
-    document.getElementById('withdrawals').innerHTML = html;
-  } catch {
-    document.getElementById('withdrawals').innerHTML = 'Failed to load. Check you are logged in as admin.';
+  } else {
+    html += `<tr><td colspan="4">No pending ${type}s</td></tr>`;
   }
+  html += `</table>`;
+  document.getElementById(divId).innerHTML = html;
 }
 
-async function updateWithdrawal(id, status) {
-  await fetch(`${BASE_URL}/api/collections/withdrawals/records/${id}`, {
-    method: 'PATCH',
-    headers: {'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json'},
-    body: JSON.stringify({status})
+async function updateTransaction(type, id, action) {
+  const res = await fetch(`${BASE_URL}/api/admin/approve-transaction`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-phone': adminPhone,
+      'x-admin-password': adminPass
+    },
+    body: JSON.stringify({type, id, action})
   });
-  loadWithdrawals();
+  
+  const data = await res.json();
+  if (!res.ok) alert(data.error || 'Action failed');
+  else alert(`Transaction ${action}d`);
+  loadTransactions();
 }
 
 async function resetPassword() {
-  const userId = document.getElementById('resetUser').value;
+  const targetPhone = document.getElementById('resetUser').value;
   const newPass = document.getElementById('resetPass').value;
+  const msgEl = document.getElementById('resetMsg');
+  msgEl.textContent = '';
+  msgEl.className = '';
   
-  const res = await fetch(`${BASE_URL}/api/collections/users/records?filter=user_id="${userId}"`, {
-    headers: {'Authorization': 'Bearer ' + authToken}
+  const res = await fetch(`${BASE_URL}/api/admin/reset-password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-phone': adminPhone,
+      'x-admin-password': adminPass
+    },
+    body: JSON.stringify({targetPhone, newPassword: newPass})
   });
+  
   const data = await res.json();
-  
-  if (!data.items || data.items.length === 0) {
-    document.getElementById('resetMsg').textContent = 'User not found';
-    return;
-  }
-  
-  await fetch(`${BASE_URL}/api/collections/users/records/${data.items[0].id}`, {
-    method: 'PATCH',
-    headers: {'Authorization': 'Bearer ' + authToken, 'Content-Type': 'application/json'},
-    body: JSON.stringify({password: newPass, passwordConfirm: newPass})
-  });
-  
-  document.getElementById('resetMsg').textContent = 'Password updated';
+  msgEl.textContent = data.message || data.error;
+  msgEl.className = res.ok ? 'success' : 'error';
 }
 </script>
 </body>
