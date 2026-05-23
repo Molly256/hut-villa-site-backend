@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }
+    .hidden { display: none; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+    th { background: #f8f9fa; }
+    button { padding: 8px 12px; border: none; border-radius: 4px; cursor: pointer; }
+    button.approve { background: #28a745; color: white; }
+    button.reject { background: #dc3545; color: white; }
+    button:hover { opacity: 0.8; }
+    input { padding: 8px; margin: 5px 0; width: 200px; }
+    .error { color: red; }
+    .success { color: green; }
+  </style>
+</head>
+<body>
+  <!-- Login Section -->
+  <div id="loginDiv" class="card">
+    <h2>Admin Login</h2>
+    <input type="tel" id="loginUser" placeholder="Phone: 07XXXXXXXX">
+    <input type="password" id="loginPass" placeholder="Password">
+    <button onclick="login()">Login</button>
+    <p id="loginError" class="error"></p>
+  </div>
+
+  <!-- Admin Section -->
+  <div id="adminDiv" class="hidden">
+    <div class="header">
+      <h2>Admin Dashboard</h2>
+      <button onclick="logout()">Logout</button>
+    </div>
+
+    <div class="card" id="depositsCard">
+      <h3>Pending Deposits</h3>
+      <div id="deposits">Loading...</div>
+    </div>
+
+    <div class="card" id="withdrawalsCard">
+      <h3>Pending Withdrawals</h3>
+      <div id="withdrawals">Loading...</div>
+    </div>
+
+    <div class="card" id="resetCard">
+      <h3>Reset User Password</h3>
+      <input type="tel" id="resetUser" placeholder="User phone: 07XXXXXXXX">
+      <input type="password" id="resetPass" placeholder="New password">
+      <button onclick="resetPassword()">Reset</button>
+      <p id="resetMsg"></p>
+    </div>
+  </div>
+
+<script>
+const BASE_URL = ''; 
+let adminPhone = localStorage.getItem('adminPhone') || '';
+let adminPass = localStorage.getItem('adminPass') || '';
+let adminRole = localStorage.getItem('adminRole') || '';
+
+// Auto-check if already logged in as admin
+if (adminPhone && adminPass && adminRole === 'admin') {
+  checkAdmin();
+} else if (adminPhone && adminPass) {
+  // Logged in but not admin, kick out
+  logout();
+}
+
+async function login() {
+  const phone = document.getElementById('loginUser').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginError').textContent = '';
+  
+  try {
+    const res = await fetch(`${BASE_URL}/api/login`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({phoneNumber: phone, password: pass})
+    });
+    
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Login failed');
+    
+    // Only allow admin role
+    if (data.user.role !== 'admin') {
+      throw new Error('Access denied. Admins only.');
+    }
+    
+    adminPhone = phone;
+    adminPass = pass;
+    adminRole = data.user.role;
+    
+    localStorage.setItem('adminPhone', adminPhone);
+    localStorage.setItem('adminPass', adminPass);
+    localStorage.setItem('adminRole', adminRole);
+    
+    checkAdmin();
+  } catch (err) {
+    document.getElementById('loginError').textContent = err.message;
+  }
+}
+
+function checkAdmin() {
+  document.getElementById('loginDiv').classList.add('hidden');
+  document.getElementById('adminDiv').classList.remove('hidden');
+  
+  // Handle PWA shortcut tab: ?tab=deposits or ?tab=withdrawals or ?tab=reset
+  const urlParams = new URLSearchParams(window.location.search);
+  const tab = urlParams.get('tab');
+  if (tab) showTab(tab);
+  
+  loadTransactions();
+}
+
+function showTab(tab) {
+  if (tab === 'deposits') {
+    document.getElementById('depositsCard').scrollIntoView({ behavior: 'smooth' });
+  }
+  if (tab === 'withdrawals') {
+    document.getElementById('withdrawalsCard').scrollIntoView({ behavior: 'smooth' });
+  }
+  if (tab === 'reset') {
+    document.getElementById('resetCard').scrollIntoView({ behavior: 'smooth' });
+    document.getElementById('resetUser').focus();
+  }
+}
+
+function logout() {
+  localStorage.clear();
+  adminPhone = '';
+  adminPass = '';
+  adminRole = '';
+  location.reload();
+}
+
+async function loadTransactions() {
+  try {
+    const res = await fetch(`${BASE_URL}/api/admin/pending-transactions`, {
+      headers: {
+        'x-admin-phone': adminPhone,
+        'x-admin-password': adminPass
+      }
+    });
+    
+    if (!res.ok) {
+      if (res.status === 403) throw new Error('Unauthorized');
+      throw new Error('Failed to load');
+    }
+    const data = await res.json();
+    
+    renderTable('deposits', data.deposits, 'deposit');
+    renderTable('withdrawals', data.withdrawals, 'withdrawal');
+  } catch (err) {
+    document.getElementById('deposits').innerHTML = err.message;
+    document.getElementById('withdrawals').innerHTML = '';
+  }
+}
+
+function renderTable(divId, items, type) {
+  let html = `<table><tr><th>Phone</th><th>Amount</th><th>Date</th><th>Action</th></tr>`;
+  if (items && items.length > 0) {
+    items.forEach(t => {
+      html += `<tr>
+        <td>${t.phonenumber}</td>
+        <td>${Number(t.amount).toLocaleString()} UGX</td>
+        <td>${new Date(t.created_at).toLocaleString()}</td>
+        <td>
+          <button class="approve" onclick="updateTransaction('${type}', ${t.id}, 'approve')">Approve</button>
+          <button class="reject" onclick="updateTransaction('${type}', ${t.id}, 'reject')">Reject</button>
+        </td>
+      </tr>`;
+    });
+  } else {
+    html += `<tr><td colspan="4">No pending ${type}s</td></tr>`;
+  }
+  html += `</table>`;
+  document.getElementById(divId).innerHTML = html;
+}
+
+async function updateTransaction(type, id, action) {
+  const res = await fetch(`${BASE_URL}/api/admin/approve-transaction`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-phone': adminPhone,
+      'x-admin-password': adminPass
+    },
+    body: JSON.stringify({type, id, action})
+  });
+  
+  const data = await res.json();
+  if (!res.ok) alert(data.error || 'Action failed');
+  else alert(`Transaction ${action}d`);
+  loadTransactions();
+}
+
+async function resetPassword() {
+  const targetPhone = document.getElementById('resetUser').value;
+  const newPass = document.getElementById('resetPass').value;
+  const msgEl = document.getElementById('resetMsg');
+  msgEl.textContent = '';
+  msgEl.className = '';
+  
+  const res = await fetch(`${BASE_URL}/api/admin/reset-password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-phone': adminPhone,
+      'x-admin-password': adminPass
+    },
+    body: JSON.stringify({targetPhone, newPassword: newPass})
+  });
+  
+  const data = await res.json();
+  msgEl.textContent = data.message || data.error;
+  msgEl.className = res.ok ? 'success' : 'error';
+}
+</script>
+</body>
+</html>
