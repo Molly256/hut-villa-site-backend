@@ -166,7 +166,7 @@ app.post('/api/update-bank', checkUser, async (req, res) => {
 });
 
 // 6. Get Huts - for VipTask.js
-app.post('/api/huts', async (req, res) => {
+app.get('/api/huts', async (req, res) => {
   try {
     const { data: huts } = await supabase
       .from('huts')
