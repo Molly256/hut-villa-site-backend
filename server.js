@@ -22,7 +22,6 @@ async function checkAdmin(req, res, next) {
   if (phone === ADMIN_PHONE && password === ADMIN_PASS) {
     return next();
   }
-  
   return res.status(403).json({ error: 'Unauthorized - Admin only' });
 }
 
@@ -43,7 +42,7 @@ async function checkUser(req, res, next) {
   next();
 }
 
-// 1. Register - stores phone exactly as user sends it
+// 1. Register
 app.post('/api/register', async (req, res) => {
   try {
     const phone = req.body.phoneNumber;
@@ -77,7 +76,7 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// 2. Login - exact phone match
+// 2. Login
 app.post('/api/login', async (req, res) => {
   try {
     const phone = req.body.phoneNumber;
@@ -104,7 +103,126 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// 3. User Deposit Request
+// 3. Dashboard - for Dashboard.js
+app.post('/api/dashboard', checkUser, async (req, res) => {
+  try {
+    const phone = req.user.phonenumber;
+    
+    const { data: referrals } = await supabase
+      .from('users')
+      .select('id')
+      .eq('referred_by', phone);
+
+    res.json({ 
+      success: true,
+      balance: req.user.balance,
+      team_count: referrals ? referrals.length : 0
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Modify Password - for ModifyPassword.js
+app.post('/api/modify-password', checkUser, async (req, res) => {
+  try {
+    const { oldPassword, newPassword } = req.body;
+    const phone = req.user.phonenumber;
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('password')
+      .eq('phonenumber', phone)
+      .single();
+
+    const valid = await bcrypt.compare(oldPassword, user.password);
+    if (!valid) return res.status(401).json({ error: 'Old password incorrect' });
+
+    const hashedPass = await bcrypt.hash(newPassword, 10);
+    await supabase.from('users').update({ password: hashedPass }).eq('phonenumber', phone);
+
+    res.json({ success: true, message: 'Password updated' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Update Bank Info - for BankInfo.js
+app.post('/api/update-bank', checkUser, async (req, res) => {
+  try {
+    const { bank_name, account_number, account_name } = req.body;
+    const phone = req.user.phonenumber;
+
+    const { error } = await supabase
+      .from('users')
+      .update({ bank_name, account_number, account_name })
+      .eq('phonenumber', phone);
+
+    if (error) throw error;
+    res.json({ success: true, message: 'Bank info updated' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Get Huts - for VipTask.js
+app.post('/api/huts', async (req, res) => {
+  try {
+    const { data: huts } = await supabase
+      .from('huts')
+      .select('*')
+      .order('price', { ascending: true });
+
+    res.json({ success: true, huts });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. Rent Hut - for VipTask.js
+app.post('/api/rent-hut', checkUser, async (req, res) => {
+  try {
+    const { hut_id } = req.body;
+    const phone = req.user.phonenumber;
+
+    const { data: hut } = await supabase.from('huts').select('*').eq('id', hut_id).single();
+    if (!hut) return res.status(404).json({ error: 'Hut not found' });
+    if (req.user.balance < hut.price) return res.status(400).json({ error: 'Insufficient balance' });
+
+    await supabase.from('users').update({ balance: req.user.balance - hut.price }).eq('phonenumber', phone);
+    
+    await supabase.from('rentals').insert([{ 
+      phonenumber: phone, 
+      hut_id, 
+      status: 'active',
+      start_time: new Date()
+    }]);
+
+    res.json({ success: true, message: 'Hut rented' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 8. Collect Hut Income - for VipTask.js
+app.post('/api/collect-hut', checkUser, async (req, res) => {
+  try {
+    const { rental_id } = req.body;
+    const phone = req.user.phonenumber;
+
+    const { data: rental } = await supabase.from('rentals').select('*').eq('id', rental_id).single();
+    if (!rental || rental.phonenumber !== phone) return res.status(404).json({ error: 'Rental not found' });
+
+    const income = rental.daily_income || 0;
+    await supabase.from('users').update({ balance: req.user.balance + income }).eq('phonenumber', phone);
+
+    res.json({ success: true, amount: income });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 9. Deposit
 app.post('/api/deposit', checkUser, async (req, res) => {
   try {
     const { amount } = req.body;
@@ -126,7 +244,7 @@ app.post('/api/deposit', checkUser, async (req, res) => {
   }
 });
 
-// 4. User Withdraw Request
+// 10. Withdraw
 app.post('/api/withdraw', checkUser, async (req, res) => {
   try {
     const { amount } = req.body;
@@ -152,7 +270,22 @@ app.post('/api/withdraw', checkUser, async (req, res) => {
   }
 });
 
-// 5. User Password Reset
+// 11. History - for Bill.js
+app.post('/api/history', checkUser, async (req, res) => {
+  try {
+    const phone = req.user.phonenumber;
+    const { type } = req.body;
+
+    let query = supabase.from(type).select('*').eq('phonenumber', phone).order('created_at', { ascending: false }).limit(20);
+    
+    const { data } = await query;
+    res.json({ success: true, history: data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reset password
 app.post('/api/reset-password', async (req, res) => {
   try {
     const phone = req.body.phoneNumber;
@@ -177,7 +310,7 @@ app.post('/api/reset-password', async (req, res) => {
   }
 });
 
-// 6. Get user data
+// Get user data
 app.get('/api/user/data', checkUser, async (req, res) => {
   try {
     const phone = req.user.phonenumber;
@@ -207,7 +340,7 @@ app.get('/api/user/data', checkUser, async (req, res) => {
   }
 });
 
-// 7. Admin routes
+// Admin routes
 app.post('/api/admin/reset-password', checkAdmin, async (req, res) => {
   try {
     const { targetPhone, newPassword } = req.body;
@@ -299,8 +432,11 @@ app.post('/api/admin/approve-transaction', checkAdmin, async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Run server locally, but export for Vercel
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
 
 module.exports = app;
